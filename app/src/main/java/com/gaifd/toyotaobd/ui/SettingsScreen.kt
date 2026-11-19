@@ -114,7 +114,7 @@ fun SettingsScreen(
             ActionRow("Откалибровать по GPS", "Едь ровно 50+ км/ч пару минут. GPS включается только на это время", onClick = onGpsCalib)
             val odo = s.odoKm?.let { it + (Trips.totalKm - s.odoAtTripsKm) }
             ActionRow(
-                "Пробег машины", odo?.let { "${fmt(it, 0)} км (≈ ${fmt(it / 1.609344, 0)} миль)" } ?: "Не задан — введи с приборки в милях, дальше считается сам в км",
+                "Пробег машины", odo?.let { "${fmt(it, 0)} км (≈ ${fmt(it / 1.609344, 0)} миль)" } ?: "Не задан — введи с приборки, дальше считается сам",
                 divider = false, onClick = { edit = "odo" },
             )
         }
@@ -252,7 +252,7 @@ fun NumberDialog(title: String, initial: String, hint: String?, onDismiss: () ->
 @Composable
 private fun OdoDialog(onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
-    var miles by remember { mutableStateOf(true) }
+    var miles by remember { mutableStateOf(false) }
     val v = text.replace(',', '.').trim().toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -261,8 +261,8 @@ private fun OdoDialog(onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("Мили", miles) { miles = true }
                     Chip("Километры", !miles) { miles = false }
+                    Chip("Мили", miles) { miles = true }
                 }
                 NumField(if (miles) "Пробег, миль" else "Пробег, км", text) { text = it }
                 if (v != null && miles) Text("= ${fmt(v * 1.609344, 0)} км", fontSize = 13.sp, color = C.muted)
