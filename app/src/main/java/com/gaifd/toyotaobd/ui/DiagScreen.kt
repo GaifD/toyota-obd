@@ -50,7 +50,7 @@ object DiagStore {
 }
 
 @Composable
-fun DiagScreen(live: Live, onCat: () -> Unit, onLive: () -> Unit) {
+fun DiagScreen(live: Live, onCat: () -> Unit, onLive: () -> Unit, onBattery: () -> Unit) {
     val diag by DiagStore.diag.collectAsState()
     val tests by DiagStore.tests.collectAsState()
     val freeze by DiagStore.freeze.collectAsState()
@@ -128,6 +128,9 @@ fun DiagScreen(live: Live, onCat: () -> Unit, onLive: () -> Unit) {
         SectionTitle("Инструменты")
         Card {
             ActionRow("Катализатор: поиск причины", "Самотест ЭБУ, датчики до и после, пропуски, смесь — и вывод", Ic.cat, C.accent, onClick = onCat)
+            if (live.battery != null || "7EA" in live.info.ecus) {
+                ActionRow("Гибридная батарея", "Напряжение 15 блоков, разброс, сопротивление, заряд", Ic.battery, onClick = onBattery)
+            }
             ActionRow("Все датчики", "Живые значения и графики всего, что отдаёт машина", Ic.pulse, divider = false, onClick = onLive)
         }
 
@@ -207,7 +210,18 @@ private fun DtcRow(d: Dtc, onCat: () -> Unit, divider: Boolean) {
                     Spacer(Modifier.width(8.dp))
                     Text("${d.kind.label} · ${d.ecuName}", fontSize = 11.sp, color = C.muted)
                 }
-                Text(d.description, fontSize = 13.sp, color = C.soft, lineHeight = 18.sp)
+                val info = d.info
+                Text(info.title, fontSize = 13.sp, color = C.soft, lineHeight = 18.sp)
+                val uc = when (info.urgency) {
+                    com.gaifd.toyotaobd.obd.Urgency.DRIVE -> C.green
+                    com.gaifd.toyotaobd.obd.Urgency.SOON -> C.amber
+                    com.gaifd.toyotaobd.obd.Urgency.STOP -> C.red
+                }
+                Text(info.urgency.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = uc, modifier = Modifier.padding(top = 4.dp))
+                if (info.causes.isNotEmpty()) {
+                    Text("Частые причины: " + info.causes.joinToString(", "), fontSize = 12.sp, color = C.muted, lineHeight = 16.sp)
+                }
+                if (info.advice.isNotBlank()) Text(info.advice, fontSize = 12.sp, color = C.muted, lineHeight = 16.sp)
             }
             if (cat) ChevronIcon(Ic.chevronRight)
         }

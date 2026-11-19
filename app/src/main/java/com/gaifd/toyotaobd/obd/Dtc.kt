@@ -6,7 +6,8 @@ data class Dtc(val code: String, val kind: Kind, val ecu: String) {
         STORED("сохранена"), PENDING("ожидающая"), PERMANENT("постоянная")
     }
 
-    val description: String get() = Dtcs.describe(code)
+    val info: DtcInfo get() = DtcBook.info(code)
+    val description: String get() = info.title
     val ecuName: String get() = Dtcs.ecuName(ecu)
 }
 
@@ -188,6 +189,8 @@ object Dtcs {
         "U0100" to "Нет связи с блоком двигателя",
         "U0293" to "Нет связи с блоком гибридной системы",
     )
+
+    fun knownTitle(code: String): String? = known[code]
 
     fun describe(code: String): String {
         known[code]?.let { return it }

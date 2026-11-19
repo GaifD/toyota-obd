@@ -29,9 +29,8 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () -> Unit) {
+fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () -> Unit, onOpen: (Trip) -> Unit) {
     var period by rememberSaveable { mutableIntStateOf(1) }
-    var confirmDelete by remember { mutableStateOf<Trip?>(null) }
     val since = remember(period) { periodStart(period) }
     val list = remember(trips, since) { trips.filter { it.start >= since } }
     val tot = remember(list) { Trips.totals(list) }
@@ -77,16 +76,21 @@ fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () 
                 KeyValue("Средняя цена в баке", "${fmt(Fuel.price(), 2)} грн/л")
                 val k = Prefs.settings.value.fuelK
                 KeyValue(
-                    "Поправка расхода", if (k == 1.0) "ещё не калибровалась" else "×${fmt(k, 3)}",
+                    "Поправка расхода", if (k == 1.0) "ещё не уточнялась" else "×${fmt(k, 3)}",
                     divider = false,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Заправляйся до полного и отмечай это — по двум полным бакам приложение само уточнит расход.",
+                    (tank.lastCalib?.let { "Последняя сверка: $it. " } ?: "") +
+                        "Расход уточняется сам: приложение сверяет насчитанное с тем, насколько упал уровень в баке. " +
+                        "Заправки ловятся сами по скачку уровня.",
                     fontSize = 12.sp, color = C.muted, lineHeight = 16.sp,
                 )
-                Spacer(Modifier.height(10.dp))
-                Button("Заправился", Modifier.fillMaxWidth(), filled = false, icon = Ic.fuel, onClick = onFill)
+                Text(
+                    "Добавить заправку вручную",
+                    fontSize = 13.sp, color = C.accent, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 10.dp).clickable(onClick = onFill),
+                )
                 if (tank.fills.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     tank.fills.takeLast(3).reversed().forEachIndexed { i, f ->
@@ -106,25 +110,29 @@ fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () 
                 BarChart(last.map { it.l100 }, last.map { SimpleDateFormat("d.MM", Locale.US).format(Date(it.start)) })
             }
         }
-        val speed = Trips.bySpeed()
-        if (speed.sumOf { it.first } > 10) item {
-            SectionTitle("Расход по скоростям", "л/100 км, за всё время")
+        val steady = Trips.steadyBySpeed()
+        val useSteady = steady.sumOf { it.first } > 10
+        val speed = if (useSteady) steady else Trips.bySpeed()
+        if (speed.sumOf { it.first } > 5) item {
+            SectionTitle("Расход по скоростям", if (useSteady) "л/100, ровный ход" else "л/100, вся езда")
             Card {
                 val vals = speed.map { (km, l) -> if (km >= 2) l / km * 100 else null }
-                val best = vals.withIndex().filter { it.value != null && it.index >= 3 }.minByOrNull { it.value!! }?.index
-                BarChart(vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" }, highlight = best)
-                if (best != null) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("Экономнее всего — ${Trip.bucketLabel(best)} км/ч: ${fmt(vals[best], 1)} л/100", fontSize = 12.sp, color = C.muted)
-                }
+                val opt = Trips.optimal()
+                BarChart(vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" }, highlight = opt?.first)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (opt != null) "Экономнее всего на ровном ходу — ${Trip.bucketLabel(opt.first)} км/ч: ${fmt(opt.second, 1)} л/100"
+                    else "Самая экономная скорость появится, когда наберётся ровной езды (по 3+ км на скорость).",
+                    fontSize = 12.sp, color = C.muted, lineHeight = 16.sp,
+                )
             }
         }
-        item { SectionTitle("История", if (trips.isNotEmpty()) "нажми, чтобы удалить" else null) }
+        item { SectionTitle("История", if (trips.isNotEmpty()) "нажми — подробности" else null) }
         if (list.isEmpty()) item {
             Text("Поездок за этот период нет. Они записываются сами, пока приложение на связи с машиной.", fontSize = 13.sp, color = C.muted, lineHeight = 18.sp)
         }
         items(list.take(200), key = { it.start }) { t ->
-            Card(Modifier.clickable { confirmDelete = t }) {
+            Card(Modifier.clickable { onOpen(t) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(df.format(Date(t.start)), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -146,16 +154,6 @@ fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () 
         }
     }
 
-    confirmDelete?.let { t ->
-        AlertDialog(
-            onDismissRequest = { confirmDelete = null },
-            containerColor = C.card,
-            title = { Text("Удалить поездку?") },
-            text = { Text("${df.format(Date(t.start))}, ${fmt(t.km, 1)} км. Топливо в баке не изменится.") },
-            confirmButton = { TextButton(onClick = { Trips.delete(t); confirmDelete = null }) { Text("Удалить", color = C.red) } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Отмена", color = C.soft) } },
-        )
-    }
 }
 
 private fun periodStart(p: Int): Long {

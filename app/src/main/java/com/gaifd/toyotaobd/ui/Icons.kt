@@ -23,7 +23,21 @@ private fun stroke(width: Float, vararg paths: String): ImageVector {
     return b.build()
 }
 
+private fun filled(vararg paths: String): ImageVector {
+    val b = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+    for (p in paths) b.addPath(pathData = addPathNodes(p), fill = SolidColor(Color.Black))
+    return b.build()
+}
+
 object Ic {
+    val play by lazy { filled("M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z") }
+    val pause by lazy { filled("M7 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z", "M14 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z") }
+    val prev by lazy { stroke(2f, "M19 20L9 12l10-8v16z", "M5 19V5") }
+    val next by lazy { stroke(2f, "M5 4l10 8-10 8V4z", "M19 5v14") }
+    val users by lazy { stroke(2f, "M9 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8z", "M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1", "M16 3.5a4 4 0 0 1 0 7.5", "M22 21v-1a6 6 0 0 0-4-5.6") }
+    val battery by lazy { stroke(2f, "M3 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z", "M22 11v2", "M6 10v4", "M10 10v4", "M14 10v4") }
+    val calendar by lazy { stroke(2f, "M4 6h16v14H4z", "M4 10h16", "M8 3v4", "M16 3v4") }
+    val lamp by lazy { stroke(2f, "M9 18h6", "M10 21h4", "M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.7 1-2.5A6 6 0 0 0 12 3z") }
     val gauge by lazy { stroke(2f, "M4.5 17.5a9 9 0 1 1 15 0", "M12 14l4-4.5", "M10.5 14a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0") }
     val route by lazy { stroke(2f, "M6 19a2 2 0 1 0 0-4a2 2 0 1 0 0 4z", "M18 9a2 2 0 1 0 0-4a2 2 0 1 0 0 4z", "M6 15V9a3 3 0 0 1 3-3h7", "M18 9v6a3 3 0 0 1-3 3H8") }
     val wrench by lazy { stroke(2f, "M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-2-2 1.3-1.3a4 4 0 0 0-5-5L3 16.4V20h3.6l4.1-4.1", "M14.7 6.3L17 4l3 3-2.3 2.3") }

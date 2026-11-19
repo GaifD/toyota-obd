@@ -65,7 +65,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private var tab by mutableIntStateOf(0)
-    private var sub by mutableStateOf<String?>(null)        // "cat", "live" внутри диагностики
+    private var sub by mutableStateOf<String?>(null)        // "cat", "live", "battery", "maint", "trip"
+    private var openTrip by mutableStateOf<Long?>(null)
+    private var showOdo by mutableStateOf(false)
     private var showDrive by mutableStateOf(false)
     private var showFill by mutableStateOf(false)
     private var picker by mutableStateOf<String?>(null)     // "elm" или "car"
@@ -89,6 +91,17 @@ class MainActivity : ComponentActivity() {
     private val locLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
         if (r.values.any { it }) showGps = true else toast("Без доступа к геолокации калибровка по GPS невозможна")
     }
+    private val trackLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        if (r.values.any { it }) {
+            Prefs.update { it.copy(gpsTrack = true) }
+            com.gaifd.toyotaobd.service.Gps.start(this)
+            if (Build.VERSION.SDK_INT >= 29 && !granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+                toast("Чтобы трек писался и с выключенным экраном, выбери «Разрешить всегда»")
+                bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+        } else toast("Без геолокации трек не записать")
+    }
+    private val bgLocLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private val cdmLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
         refresh()
         if (carLinked) toast("Машина привязана")
@@ -113,6 +126,8 @@ class MainActivity : ComponentActivity() {
         Prefs.init(this)
         Trips.init(this)
         Fuel.init(this)
+        com.gaifd.toyotaobd.data.Riders.init(this)
+        com.gaifd.toyotaobd.data.Maint.init(this)
         handleIntent(intent)
 
         if (System.currentTimeMillis() - Prefs.lastUpdateCheck > 12 * 3600_000L) {
@@ -300,6 +315,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun gpsTrack(on: Boolean) {
+        if (!on) {
+            Prefs.update { it.copy(gpsTrack = false) }
+            com.gaifd.toyotaobd.service.Gps.stop()
+            return
+        }
+        trackLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+
     private fun gpsCalib() {
         if (granted(Manifest.permission.ACCESS_FINE_LOCATION)) showGps = true
         else locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
@@ -353,11 +377,12 @@ class MainActivity : ComponentActivity() {
         val trips by Trips.items.collectAsState()
         val updateState by Updater.state.collectAsState()
         val updateVersion = (updateState as? UpdateState.Available)?.info?.version
+        val radio = rememberRadio()
 
         if (showDrive) {
             BackHandler { showDrive = false }
             Box(Modifier.fillMaxSize().background(C.bg).statusBarsPadding().navigationBarsPadding()) {
-                DriveScreen(live, settings) { showDrive = false }
+                DriveScreen(live, settings, radio) { showDrive = false }
             }
             return
         }
@@ -365,21 +390,31 @@ class MainActivity : ComponentActivity() {
         Scaffold(containerColor = C.bg, bottomBar = { BottomNav() }) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    0 -> DashScreen(
-                        live = live, s = settings, tank = tank, batteryOk = batteryOk, update = updateVersion,
+                    0 -> if (sub == "maint") MaintScreen(onBack = { sub = null }, onSetOdo = { showOdo = true }) else DashScreen(
+                        live = live, s = settings, tank = tank, batteryOk = batteryOk, update = updateVersion, radio = radio,
                         onConnect = ::connect,
                         onDisconnect = { ObdService.stop(this@MainActivity) },
                         onDrive = { showDrive = true },
                         onSettings = { tab = 3 },
                         onDiag = { tab = 2; sub = null },
+                        onBattery = { tab = 2; sub = "battery" },
+                        onMaint = { sub = "maint" },
                         onFixBattery = ::fixBattery,
                         onFill = { showFill = true },
                     )
-                    1 -> TripsScreen(trips, tank, onFill = { showFill = true }, onExport = { exportLauncher.launch("bortovik-trips.csv") })
+                    1 -> {
+                        val t = openTrip?.let { id -> trips.firstOrNull { it.start == id } }
+                        if (sub == "trip" && t != null) TripScreen(t) { sub = null; openTrip = null }
+                        else TripsScreen(
+                            trips, tank, onFill = { showFill = true }, onExport = { exportLauncher.launch("bortovik-trips.csv") },
+                            onOpen = { openTrip = it.start; sub = "trip" },
+                        )
+                    }
                     2 -> when (sub) {
                         "cat" -> CatScreen(live) { sub = null }
                         "live" -> LiveScreen(live) { sub = null }
-                        else -> DiagScreen(live, onCat = { sub = "cat" }, onLive = { sub = "live" })
+                        "battery" -> BatteryScreen(live) { sub = null }
+                        else -> DiagScreen(live, onCat = { sub = "cat" }, onLive = { sub = "live" }, onBattery = { sub = "battery" })
                     }
                     else -> SettingsScreen(
                         s = settings,
@@ -391,6 +426,7 @@ class MainActivity : ComponentActivity() {
                         onFixBattery = ::fixBattery,
                         onFixNotifications = ::fixNotifications,
                         onGpsCalib = ::gpsCalib,
+                        onGpsTrack = ::gpsTrack,
                         onToyotaScan = ::toyotaScan,
                         onCheckUpdate = { lifecycleScope.launch { Updater.check() } },
                         onDownloadUpdate = { info -> lifecycleScope.launch { Updater.download(this@MainActivity, info) } },
@@ -402,6 +438,7 @@ class MainActivity : ComponentActivity() {
 
         if (showFill) FillDialog(tank.pendingFillL, live.fuelLevelL) { showFill = false }
         if (showGps) GpsCalibDialog { showGps = false }
+        if (showOdo) OdoDialog { showOdo = false }
         picker?.let { kind ->
             DevicePicker(
                 title = if (kind == "elm") "Адаптер OBD2" else "Bluetooth машины",
@@ -420,10 +457,10 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth().background(C.bar)) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(C.line))
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)) {
-                NavItem("Приборы", Ic.gauge, tab == 0, Modifier.weight(1f)) { tab = 0 }
-                NavItem("Поездки", Ic.route, tab == 1, Modifier.weight(1f)) { tab = 1 }
-                NavItem("Диагностика", Ic.wrench, tab == 2, Modifier.weight(1f)) { if (tab == 2) sub = null; tab = 2 }
-                NavItem("Настройки", Ic.sliders, tab == 3, Modifier.weight(1f)) { tab = 3 }
+                NavItem("Приборы", Ic.gauge, tab == 0, Modifier.weight(1f)) { sub = null; tab = 0 }
+                NavItem("Поездки", Ic.route, tab == 1, Modifier.weight(1f)) { sub = null; tab = 1 }
+                NavItem("Диагностика", Ic.wrench, tab == 2, Modifier.weight(1f)) { sub = null; tab = 2 }
+                NavItem("Настройки", Ic.sliders, tab == 3, Modifier.weight(1f)) { sub = null; tab = 3 }
             }
         }
     }

@@ -67,6 +67,7 @@ data class Live(
     val values: Map<Int, Double> = emptyMap(),
     val trip: TripLive? = null,
     val info: CarInfo = CarInfo(),
+    val battery: com.gaifd.toyotaobd.obd.BatteryData? = null,
     val updated: Long = 0,
 ) {
     val coolant: Double? get() = values[Pids.COOLANT]
@@ -115,6 +116,26 @@ object Obd {
 
     /** Экран «Все датчики» открыт — перебираем все PID. */
     val watchAll = MutableStateFlow(false)
+
+    /** Экран «Батарея» открыт — опрашиваем блоки часто. */
+    val watchBattery = MutableStateFlow(false)
+
+    /** «Хватит ли»: сколько ехать, отсчёт от пробега поездки в момент постановки цели. */
+    data class Goal(val startKm: Double, val distanceKm: Double)
+
+    val goal = MutableStateFlow<Goal?>(null)
+
+    /** Точки текущей поездки (раз в ~5 с) — для попутчиков «сел N минут назад» и для записи. */
+    private val points = ArrayList<com.gaifd.toyotaobd.data.TripPoint>()
+
+    fun addPoint(p: com.gaifd.toyotaobd.data.TripPoint) = synchronized(points) { points += p }
+
+    fun takePoints(): List<com.gaifd.toyotaobd.data.TripPoint> = synchronized(points) { ArrayList(points).also { points.clear() } }
+
+    /** Накопленные км и литры поездки в момент [t] (ближайшая точка не позже). */
+    fun pointAt(t: Long): com.gaifd.toyotaobd.data.TripPoint? = synchronized(points) {
+        points.lastOrNull { it.t <= t } ?: points.firstOrNull()
+    }
 
     fun physHdr(ecu: String): String? = when (ecu.length) {
         3 -> ecu.toIntOrNull(16)?.let { "%03X".format(it - 8) }

@@ -52,6 +52,7 @@ fun SettingsScreen(
     onFixBattery: () -> Unit,
     onFixNotifications: () -> Unit,
     onGpsCalib: () -> Unit,
+    onGpsTrack: (Boolean) -> Unit,
     onToyotaScan: () -> Unit,
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: (UpdateInfo) -> Unit,
@@ -100,6 +101,12 @@ fun SettingsScreen(
                 (if (s.fuelK == 1.0) "Без поправки. " else "×${fmt(s.fuelK, 3)}. ") + "Уточняется сама по заправкам до полного; можно задать вручную",
                 onClick = { edit = "fuelK" },
             )
+            val tank = com.gaifd.toyotaobd.data.Fuel.tank.collectAsState().value
+            ActionRow(
+                "Порог лампочки", tank.lampL?.let { "Лампочка горит при ${fmt(it, 1)} л — нажми, чтобы сбросить" }
+                    ?: "Пока примерно ${fmt(com.gaifd.toyotaobd.data.Range.DEFAULT_LAMP_L, 1)} л. Загорится — нажми «Лампочка» на «Приборах»",
+                onClick = { if (tank.lampL != null) com.gaifd.toyotaobd.data.Fuel.setLamp(null) },
+            )
             val m = Obd.live.collectAsState().value.info.fuelMethod
             Text("Расход считается $m.", fontSize = 12.sp, color = C.muted, modifier = Modifier.padding(top = 8.dp))
         }
@@ -112,6 +119,11 @@ fun SettingsScreen(
                 onClick = { edit = "speedK" },
             )
             ActionRow("Откалибровать по GPS", "Едь ровно 50+ км/ч пару минут. GPS включается только на это время", onClick = onGpsCalib)
+            ToggleRow(
+                "Трек поездки на карте", "GPS во время поездок. При глушилках прыжки отбрасываются по скорости машины. " +
+                    "Чтобы писалось с выключенным экраном, разреши геолокацию «Всегда»",
+                s.gpsTrack, onChange = onGpsTrack,
+            )
             val odo = s.odoKm?.let { it + (Trips.totalKm - s.odoAtTripsKm) }
             ActionRow(
                 "Пробег машины", odo?.let { "${fmt(it, 0)} км (≈ ${fmt(it / 1.609344, 0)} миль)" } ?: "Не задан — введи с приборки, дальше считается сам",
@@ -124,7 +136,13 @@ fun SettingsScreen(
             ToggleRow("Перегрев", "Температура ОЖ 108 °C и выше", s.warnCoolant) { v -> Prefs.update { it.copy(warnCoolant = v) } }
             ToggleRow("Новые ошибки", "Появился код — сразу уведомление с расшифровкой", s.warnDtc) { v -> Prefs.update { it.copy(warnDtc = v) } }
             ToggleRow("Аккумулятор 12 В", "Разряжен на стоянке или не заряжается на ходу", s.warnVolt) { v -> Prefs.update { it.copy(warnVolt = v) } }
-            ToggleRow("Мало топлива", "Запас хода меньше 60 км", s.warnFuel, divider = false) { v -> Prefs.update { it.copy(warnFuel = v) } }
+            ToggleRow("Мало топлива", "До лампочки меньше 60 км", s.warnFuel) { v -> Prefs.update { it.copy(warnFuel = v) } }
+            ToggleRow("Гибридная батарея не заряжается", "Заряд ниже 35% и не растёт, хотя двигатель работает", s.warnSoc, divider = false) { v -> Prefs.update { it.copy(warnSoc = v) } }
+        }
+
+        SectionTitle("Попутчики")
+        Card {
+            ActionRow("Износ для «Пассажиров»", "${fmt(s.wearRate, 2)} грн/км — с «Друзей» только топливо", divider = false, onClick = { edit = "wear" })
         }
 
         SectionTitle("Экран")
@@ -193,6 +211,9 @@ fun SettingsScreen(
             "Например, −3 — если машина завышает на 3%. 0 — без поправки.", { edit = null }, allowMinus = true,
         ) { v -> Prefs.update { it.copy(speedK = (1 + v / 100).coerceIn(0.8, 1.2)) } }
         "odo" -> OdoDialog(onDismiss = { edit = null })
+        "wear" -> NumberDialog("Износ, грн за км", fmt(s.wearRate, 2), "Шины, масло, амортизация. Берётся только с «Пассажиров».", { edit = null }) { v ->
+            Prefs.update { it.copy(wearRate = v.coerceIn(0.0, 100.0)) }
+        }
     }
 
     if (showJournal) {
@@ -250,7 +271,7 @@ fun NumberDialog(title: String, initial: String, hint: String?, onDismiss: () ->
 }
 
 @Composable
-private fun OdoDialog(onDismiss: () -> Unit) {
+fun OdoDialog(onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var miles by remember { mutableStateOf(false) }
     val v = text.replace(',', '.').trim().toDoubleOrNull()

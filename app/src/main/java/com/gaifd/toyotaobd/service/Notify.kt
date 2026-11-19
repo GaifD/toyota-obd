@@ -87,4 +87,6 @@ object Notify {
     const val ID_FILL = 20
     const val ID_TRIP = 21
     const val ID_START = 22
+    const val ID_SOC = 14
+    const val ID_MAINT = 23
 }

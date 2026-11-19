@@ -22,6 +22,9 @@ data class Settings(
     val warnDtc: Boolean = true,
     val warnVolt: Boolean = true,
     val warnFuel: Boolean = true,
+    val warnSoc: Boolean = true,
+    val wearRate: Double = 2.0,          // грн/км износа для «Пассажиров»
+    val gpsTrack: Boolean = false,       // трек на карте — по желанию (глушилки)
     val hudMirror: Boolean = true,
     val keepScreenOn: Boolean = true,
     val theme: Int = THEME_DARK,
@@ -31,7 +34,7 @@ data class Settings(
         put("elmMac", elmMac); put("elmName", elmName); put("carMac", carMac); put("carName", carName)
         put("autoStart", autoStart); put("tankL", tankL); put("defaultPrice", defaultPrice)
         put("fuelK", fuelK); put("speedK", speedK); put("odoKm", odoKm); put("odoAtTripsKm", odoAtTripsKm)
-        put("warnCoolant", warnCoolant); put("warnDtc", warnDtc); put("warnVolt", warnVolt); put("warnFuel", warnFuel)
+        put("warnCoolant", warnCoolant); put("warnDtc", warnDtc); put("warnVolt", warnVolt); put("warnFuel", warnFuel); put("warnSoc", warnSoc); put("wearRate", wearRate); put("gpsTrack", gpsTrack)
         put("hudMirror", hudMirror); put("keepScreenOn", keepScreenOn); put("theme", theme); put("accent", accent)
     }
 
@@ -60,6 +63,9 @@ data class Settings(
                 warnDtc = o.optBoolean("warnDtc", true),
                 warnVolt = o.optBoolean("warnVolt", true),
                 warnFuel = o.optBoolean("warnFuel", true),
+                warnSoc = o.optBoolean("warnSoc", true),
+                wearRate = o.optDouble("wearRate", 2.0),
+                gpsTrack = o.optBoolean("gpsTrack", false),
                 hudMirror = o.optBoolean("hudMirror", true),
                 keepScreenOn = o.optBoolean("keepScreenOn", true),
                 theme = o.optInt("theme", d.theme),
@@ -107,6 +113,15 @@ object Prefs {
     var knownDtcs: Set<String>
         get() = sp.getStringSet("knownDtcs", emptySet()) ?: emptySet()
         set(v) = sp.edit().putStringSet("knownDtcs", v).apply()
+
+    /** Заряд гибридной батареи в моменты, когда заводился двигатель, — из них узнаём порог. */
+    var engineStartSoc: List<Double>
+        get() = (sp.getString("engineStartSoc", "") ?: "").split(';').mapNotNull { it.toDoubleOrNull() }
+        set(v) = sp.edit().putString("engineStartSoc", v.takeLast(30).joinToString(";")).apply()
+
+    /** Порог заряда, при котором заводится двигатель (медиана наблюдений, по умолчанию 40%). */
+    val socThreshold: Double
+        get() = engineStartSoc.takeIf { it.size >= 3 }?.sorted()?.let { it[it.size / 2] } ?: 40.0
 
     /** Напряжение 12 В при последних подключениях — видно, если адаптер сажает аккумулятор. */
     var voltLog: List<Pair<Long, Double>>

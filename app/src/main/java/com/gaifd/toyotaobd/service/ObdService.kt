@@ -97,7 +97,22 @@ class ObdService : Service() {
         var maxKmh = 0.0
         val bKm = DoubleArray(Trip.BUCKETS)
         val bL = DoubleArray(Trip.BUCKETS)
+        val sKm = DoubleArray(Trip.BUCKETS)
+        val sL = DoubleArray(Trip.BUCKETS)
+        var tankStart: Double? = null
+        var lastPoint = 0L
+        var hasTrack = false
     }
+
+    /** Скорости за последние 30 с — чтобы понять, ровный ли ход. */
+    private val speedWin = ArrayDeque<Pair<Long, Double>>()
+
+    // Заряд гибридной батареи: запуски двигателя и «не растёт».
+    private var prevRpm: Double? = null
+    private var lowSocSince = 0L
+    private var lowSocAt = 0.0
+    private var warnedSoc = false
+    private var maintNotified = false
 
     private var acc: Acc? = null
     private var lastT = 0L
@@ -116,6 +131,8 @@ class ObdService : Service() {
         Prefs.init(this)
         Trips.init(this)
         Fuel.init(this)
+        com.gaifd.toyotaobd.data.Riders.init(this)
+        com.gaifd.toyotaobd.data.Maint.init(this)
         Notify.channels(this)
     }
 
@@ -140,9 +157,21 @@ class ObdService : Service() {
     private fun goForeground(): Boolean = try {
         val n = Notify.service(this, "Подключаюсь к адаптеру…")
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(Notify.SERVICE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            val withGps = Prefs.settings.value.gpsTrack && Gps.permitted(this)
+            try {
+                startForeground(
+                    Notify.SERVICE_ID, n,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        (if (withGps) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0),
+                )
+                if (withGps) Gps.start(this)
+            } catch (e: SecurityException) {
+                // Геолокация «только при использовании», а запустились из фона — едем без трека.
+                startForeground(Notify.SERVICE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            }
         } else {
             startForeground(Notify.SERVICE_ID, n)
+            Gps.start(this)
         }
         if (wake == null) {
             wake = getSystemService(PowerManager::class.java)
@@ -160,6 +189,7 @@ class ObdService : Service() {
         job?.cancel()
         job = null
         finishTrip()
+        Gps.stop()
         Obd.elm?.close()
         Obd.elm = null
         Obd.live.update { Live(conn = Conn.OFF, info = it.info) }
@@ -175,6 +205,7 @@ class ObdService : Service() {
 
     override fun onDestroy() {
         finishTrip()
+        Gps.stop()
         Obd.elm?.close()
         Obd.elm = null
         running = false
@@ -379,7 +410,12 @@ class ObdService : Service() {
         level = null
         fillChecked = false
         warnedCoolant = false; warnedFuel = false; warnedVolt = false; lowVoltCount = 0
+        warnedSoc = false; lowSocSince = 0L; prevRpm = null
+        var lastBattery = 0L
+        var lastIr = 0L
+        val hasBattery = "7EA" in info.ecus
         startTrip()
+        maintCheck()
         while (true) {
             coroutineContext.ensureActive()
             val t0 = System.currentTimeMillis()
@@ -414,6 +450,15 @@ class ObdService : Service() {
                 readVolt(e, first = false)
                 lastVolt = t0
             }
+            if (hasBattery) {
+                val fast = Obd.watchBattery.value
+                if (t0 - lastBattery > (if (fast) 1500L else 60_000L)) {
+                    readBattery(e, t0 - lastIr > (if (fast) 10_000L else 300_000L))
+                    if (t0 - lastIr > (if (fast) 10_000L else 300_000L)) lastIr = t0
+                    lastBattery = t0
+                }
+            }
+            socWatch(rpm)
             integrate(rpm, spd, lph)
             alerts()
             cycle++
@@ -495,7 +540,8 @@ class ObdService : Service() {
         if (!fillChecked && levels.size >= 3) {
             fillChecked = true
             val l = level ?: return
-            Fuel.checkFill(l)?.let { added ->
+            acc?.let { if (it.tankStart == null) it.tankStart = l }
+            Fuel.atTripStart(l)?.let { added ->
                 Notify.info(
                     this, Notify.ID_FILL, "Заправка: примерно ${fmt(added, 0)} л",
                     "Укажи цену — стоимость поездок будет считаться по ней.", tab = 1, fill = true,
@@ -530,7 +576,7 @@ class ObdService : Service() {
             Notify.alert(
                 this, Notify.ID_DTC,
                 if (fresh.size == 1) "Новая ошибка: $first" else "Новые ошибки: ${fresh.joinToString()}",
-                Dtcs.describe(first) + ". Открой «Диагностику», чтобы посмотреть подробнее.",
+                com.gaifd.toyotaobd.obd.DtcBook.info(first).let { "${it.title}. ${it.urgency.label}." },
             )
         }
         Prefs.knownDtcs = codes
@@ -565,6 +611,25 @@ class ObdService : Service() {
             val b = (speed / 10).toInt().coerceIn(0, Trip.BUCKETS - 1)
             a.bKm[b] += dKm
             a.bL[b] += dL
+            // Ровный ход: за последние 30 с скорость гуляет не больше чем на 6 км/ч.
+            speedWin.addLast(now to speed)
+            while (speedWin.isNotEmpty() && now - speedWin.first().first > 30_000) speedWin.removeFirst()
+            val steady = speed > 20 && speedWin.size >= 10 && now - speedWin.first().first > 20_000 &&
+                (speedWin.maxOf { it.second } - speedWin.minOf { it.second }) <= 6
+            if (steady) {
+                a.sKm[b] += dKm
+                a.sL[b] += dL
+            }
+            if (now - a.lastPoint >= 5000) {
+                a.lastPoint = now
+                val ll = Gps.point(speed)
+                if (ll != null) a.hasTrack = true
+                Obd.addPoint(
+                    com.gaifd.toyotaobd.data.TripPoint(
+                        now, a.km, a.fuelL, speed, lph ?: 0.0, values[Pids.HV_SOC], values[Pids.COOLANT], ll?.first, ll?.second,
+                    )
+                )
+            }
             TripLive(a.start, a.km, a.ms / 1000, a.movingMs / 1000, a.fuelL, a.evKm, a.maxKmh)
         }
         if (lph != null && speed > 3) inst = lph / speed * 100
@@ -590,13 +655,23 @@ class ObdService : Service() {
             acc = null
             x
         } ?: return
-        if (a.km < 0.1 && a.fuelL < 0.05) return
+        val pts = Obd.takePoints()
+        com.gaifd.toyotaobd.data.Riders.closeTrip(a.start, System.currentTimeMillis(), a.km, a.fuelL)
+        Obd.goal.value = null
+        speedWin.clear()
+        if (a.km < 0.1 && a.fuelL < 0.05) {
+            com.gaifd.toyotaobd.data.Riders.deleteTrip(a.start)
+            return
+        }
         val price = Fuel.price()
         val t = Trip(
             start = a.start, end = System.currentTimeMillis(), km = a.km, sec = a.ms / 1000,
             movingSec = a.movingMs / 1000, fuelL = a.fuelL, evKm = a.evKm, maxKmh = a.maxKmh,
             price = price, cost = a.fuelL * price, bucketKm = a.bKm.toList(), bucketL = a.bL.toList(),
+            steadyKm = a.sKm.toList(), steadyL = a.sL.toList(), tankStart = a.tankStart, tankEnd = level,
+            hasTrack = a.hasTrack,
         )
+        com.gaifd.toyotaobd.data.Series.save(a.start, pts)
         Trips.add(t)
         Fuel.consume(a.fuelL, level)
         Obd.live.update { it.copy(trip = null) }
@@ -635,12 +710,79 @@ class ObdService : Service() {
         }
         val lvl = level
         if (lvl != null && s.warnFuel && !warnedFuel) {
-            val l100 = Trips.recentL100() ?: 9.0
-            val range = lvl / l100 * 100
-            if (range < 60) {
+            val t = acc
+            val r = com.gaifd.toyotaobd.data.Range.of(lvl, t?.km ?: 0.0, t?.fuelL ?: 0.0)
+            if (r != null && r.toLamp < 60) {
                 warnedFuel = true
-                Notify.alert(this, Notify.ID_FUEL, "Мало топлива: ~${fmt(lvl, 0)} л", "Хватит примерно на ${range.toInt()} км.", tab = 0)
+                Notify.alert(
+                    this, Notify.ID_FUEL, "Мало топлива: ~${fmt(lvl, 0)} л",
+                    "До лампочки ~${r.toLamp.toInt()} км, до сухого бака ~${r.toEmpty.toInt()} км.", tab = 0,
+                )
             }
+        }
+    }
+
+    private fun readBattery(e: Elm, withIr: Boolean) {
+        val r = try {
+            e.request("2181", com.gaifd.toyotaobd.obd.Battery.HDR, 1500).firstOrNull { it.u8(1) == 0x81 }
+        } catch (_: NoCarException) {
+            null
+        } ?: return
+        val blocks = com.gaifd.toyotaobd.obd.Battery.parseBlocks(r) ?: return
+        val ir = if (withIr) {
+            try {
+                e.request("2195", com.gaifd.toyotaobd.obd.Battery.HDR, 1500).firstOrNull { it.u8(1) == 0x95 }
+                    ?.let { com.gaifd.toyotaobd.obd.Battery.parseIr(it, blocks.size) }
+            } catch (_: NoCarException) {
+                null
+            }
+        } else Obd.live.value.battery?.ir
+        val d = com.gaifd.toyotaobd.obd.BatteryData(blocks, ir)
+        Samples.add("bat_spread", d.spread)
+        Samples.add("bat_total", d.total)
+        Obd.live.update { it.copy(battery = d) }
+    }
+
+    /** Запоминаем заряд при запусках двигателя и следим, чтобы он не падал ниже 35% без подзарядки. */
+    private fun socWatch(rpm: Double?) {
+        val soc = values[Pids.HV_SOC] ?: return
+        val now = System.currentTimeMillis()
+        val p = prevRpm
+        val spd = Obd.live.value.speed ?: 0.0
+        if (p != null && rpm != null && p < 100 && rpm > 600 && spd > 5 && soc in 25.0..70.0) {
+            Prefs.engineStartSoc = Prefs.engineStartSoc + soc
+        }
+        prevRpm = rpm
+        if (!Prefs.settings.value.warnSoc || warnedSoc) return
+        if (soc < 35 && (rpm ?: 0.0) > 600) {
+            if (lowSocSince == 0L) {
+                lowSocSince = now
+                lowSocAt = soc
+            } else if (now - lowSocSince > 120_000) {
+                if (soc <= lowSocAt) {
+                    warnedSoc = true
+                    Notify.alert(
+                        this, Notify.ID_SOC, "Гибридная батарея не заряжается: ${soc.toInt()}%",
+                        "Двигатель работает уже 2 минуты, а заряд не растёт. Если повторится — проверь батарею в «Диагностике».", tab = 2,
+                    )
+                } else {
+                    lowSocSince = now
+                    lowSocAt = soc
+                }
+            }
+        } else lowSocSince = 0L
+    }
+
+    /** Раз в поездку — напомнить о просроченном ТО. */
+    private fun maintCheck() {
+        if (maintNotified) return
+        maintNotified = true
+        val odo = com.gaifd.toyotaobd.data.Maint.odo()
+        val due = com.gaifd.toyotaobd.data.Maint.items.value.filter {
+            com.gaifd.toyotaobd.data.Maint.status(it, odo).state == com.gaifd.toyotaobd.data.MaintState.OVERDUE
+        }
+        if (due.isNotEmpty()) {
+            Notify.info(this, Notify.ID_MAINT, "Пора на ТО", due.joinToString { it.name }, tab = 0)
         }
     }
 

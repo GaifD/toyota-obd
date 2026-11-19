@@ -27,6 +27,11 @@ data class Trip(
     val cost: Double,
     val bucketKm: List<Double>,   // пробег по скоростям: 0–10, 10–20 … 110+ км/ч
     val bucketL: List<Double>,    // топливо по тем же скоростям
+    val steadyKm: List<Double> = List(BUCKETS) { 0.0 },   // то же, но только ровный ход (без разгонов)
+    val steadyL: List<Double> = List(BUCKETS) { 0.0 },
+    val tankStart: Double? = null,
+    val tankEnd: Double? = null,
+    val hasTrack: Boolean = false,
 ) {
     val l100: Double? get() = if (km >= 0.5) fuelL / km * 100 else null
     val avgKmh: Double get() = if (sec > 0) km / (sec / 3600.0) else 0.0
@@ -37,6 +42,10 @@ data class Trip(
         put("start", start); put("end", end); put("km", km); put("sec", sec); put("movingSec", movingSec)
         put("fuelL", fuelL); put("evKm", evKm); put("maxKmh", maxKmh); put("price", price); put("cost", cost)
         put("bucketKm", JSONArray(bucketKm)); put("bucketL", JSONArray(bucketL))
+        put("steadyKm", JSONArray(steadyKm)); put("steadyL", JSONArray(steadyL))
+        tankStart?.let { put("tankStart", it) }
+        tankEnd?.let { put("tankEnd", it) }
+        put("hasTrack", hasTrack)
     }
 
     companion object {
@@ -51,9 +60,73 @@ data class Trip(
             evKm = o.optDouble("evKm", 0.0), maxKmh = o.optDouble("maxKmh", 0.0),
             price = o.optDouble("price", 0.0), cost = o.optDouble("cost", 0.0),
             bucketKm = arr(o.optJSONArray("bucketKm")), bucketL = arr(o.optJSONArray("bucketL")),
+            steadyKm = arr(o.optJSONArray("steadyKm")), steadyL = arr(o.optJSONArray("steadyL")),
+            tankStart = if (o.has("tankStart")) o.optDouble("tankStart") else null,
+            tankEnd = if (o.has("tankEnd")) o.optDouble("tankEnd") else null,
+            hasTrack = o.optBoolean("hasTrack"),
         )
 
         fun bucketLabel(i: Int): String = if (i == BUCKETS - 1) "${i * 10}+" else "${i * 10}–${i * 10 + 10}"
+    }
+}
+
+/** Точка записи поездки (раз в ~5 с): накопленные км и литры, скорость, расход, заряд, ОЖ, координаты. */
+data class TripPoint(
+    val t: Long,
+    val km: Double,
+    val fuel: Double,
+    val speed: Double,
+    val lph: Double,
+    val soc: Double?,
+    val coolant: Double?,
+    val lat: Double?,
+    val lon: Double?,
+)
+
+/** Подробная запись поездок — отдельными файлами, чтобы список поездок оставался лёгким. */
+object Series {
+    private lateinit var dir: File
+
+    fun init(ctx: Context) {
+        dir = File(ctx.applicationContext.filesDir, "series").apply { mkdirs() }
+    }
+
+    private fun file(start: Long) = File(dir, "$start.json")
+
+    fun save(start: Long, pts: List<TripPoint>) {
+        try {
+            val a = JSONArray()
+            for (p in pts) {
+                val r = JSONArray()
+                r.put(p.t); r.put(p.km); r.put(p.fuel); r.put(p.speed); r.put(p.lph)
+                r.put(p.soc ?: JSONObject.NULL); r.put(p.coolant ?: JSONObject.NULL)
+                r.put(p.lat ?: JSONObject.NULL); r.put(p.lon ?: JSONObject.NULL)
+                a.put(r)
+            }
+            file(start).writeText(a.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    fun load(start: Long): List<TripPoint> = try {
+        val f = file(start)
+        if (!f.exists()) emptyList() else {
+            val a = JSONArray(f.readText())
+            List(a.length()) { i ->
+                val r = a.getJSONArray(i)
+                fun d(k: Int): Double? = if (r.isNull(k)) null else r.optDouble(k)
+                TripPoint(r.optLong(0), r.optDouble(1), r.optDouble(2), r.optDouble(3), r.optDouble(4), d(5), d(6), d(7), d(8))
+            }
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    fun delete(start: Long) {
+        try {
+            file(start).delete()
+        } catch (_: Exception) {
+        }
     }
 }
 
@@ -72,6 +145,7 @@ object Trips {
     @Synchronized
     fun init(ctx: Context) {
         if (ready) return
+        Series.init(ctx)
         file = File(ctx.applicationContext.filesDir, "trips.json")
         _items.value = try {
             if (file.exists()) {
@@ -96,7 +170,11 @@ object Trips {
 
     fun add(t: Trip) = save((listOf(t) + _items.value).sortedByDescending { it.start })
 
-    fun delete(t: Trip) = save(_items.value.filter { it.start != t.start })
+    fun delete(t: Trip) {
+        save(_items.value.filter { it.start != t.start })
+        Series.delete(t.start)
+        Riders.deleteTrip(t.start)
+    }
 
     val totalKm: Double get() = _items.value.sumOf { it.km }
 
@@ -105,17 +183,15 @@ object Trips {
         list.sumOf { it.sec }, list.sumOf { it.evKm },
     )
 
-    fun since(ms: Long): List<Trip> = _items.value.filter { it.start >= ms }
-
-    /** Средний расход по последним ~500 км — для запаса хода. */
-    fun recentL100(): Double? {
+    /** Пробег и литры за последние ~150 км — основа прогноза запаса хода. */
+    fun recent(maxKm: Double = 150.0): Pair<Double, Double> {
         var km = 0.0
         var l = 0.0
         for (t in _items.value) {
             km += t.km; l += t.fuelL
-            if (km >= 500) break
+            if (km >= maxKm) break
         }
-        return if (km >= 20) l / km * 100 else null
+        return km to l
     }
 
     /** Расход по скоростям за всё время. */
@@ -127,6 +203,30 @@ object Trips {
             l[i] += t.bucketL.getOrElse(i) { 0.0 }
         }
         return List(Trip.BUCKETS) { km[it] to l[it] }
+    }
+
+    /** Расход на ровном ходу по скоростям (км, л) — из него ищем самую экономную скорость. */
+    fun steadyBySpeed(): List<Pair<Double, Double>> {
+        val km = DoubleArray(Trip.BUCKETS)
+        val l = DoubleArray(Trip.BUCKETS)
+        for (t in _items.value) for (i in 0 until Trip.BUCKETS) {
+            km[i] += t.steadyKm.getOrElse(i) { 0.0 }
+            l[i] += t.steadyL.getOrElse(i) { 0.0 }
+        }
+        return List(Trip.BUCKETS) { km[it] to l[it] }
+    }
+
+    /** Самая экономная скорость на ровном ходу (от 30 км/ч): номер диапазона и л/100. Нужно ≥ 3 км в диапазоне. */
+    fun optimal(): Pair<Int, Double>? = steadyBySpeed().withIndex()
+        .filter { it.index >= 3 && it.value.first >= 3.0 }
+        .map { it.index to it.value.second / it.value.first * 100 }
+        .minByOrNull { it.second }
+
+    /** Расход на ровном ходу в диапазоне скорости, если накоплено. */
+    fun steadyL100At(kmh: Double): Double? {
+        val i = (kmh / 10).toInt().coerceIn(0, Trip.BUCKETS - 1)
+        val (km, l) = steadyBySpeed()[i]
+        return if (km >= 3) l / km * 100 else null
     }
 
     fun csv(): String {
@@ -142,5 +242,36 @@ object Trips {
                 .append("%.2f".format(Locale.US, t.price)).append(';').append("%.2f".format(Locale.US, t.cost)).append('\n')
         }
         return sb.toString()
+    }
+}
+
+/**
+ * Запас хода: литры в баке (с датчика) ÷ расход. Расход — твой за последние ~150 км вместе с текущей
+ * поездкой, поэтому меняется плавно от стиля езды и сезона. Две цифры: до лампочки и до сухого бака.
+ */
+data class RangeInfo(val toLamp: Double, val toEmpty: Double, val l100: Double, val fewData: Boolean, val lampKnown: Boolean)
+
+object Range {
+    const val DEFAULT_L100 = 9.5
+    const val DEFAULT_LAMP_L = 7.5
+
+    /** Расход для прогноза: недавние поездки + текущая. */
+    fun l100(tripKm: Double = 0.0, tripL: Double = 0.0): Pair<Double, Boolean> {
+        val (km, l) = Trips.recent()
+        val k = km + tripKm
+        val f = l + tripL
+        return if (k >= 30) (f / k * 100).coerceIn(3.0, 30.0) to (k < 100) else DEFAULT_L100 to true
+    }
+
+    fun of(levelL: Double?, tripKm: Double = 0.0, tripL: Double = 0.0, l100Override: Double? = null): RangeInfo? {
+        val lvl = levelL ?: return null
+        val (l100, few) = l100Override?.let { it to false } ?: l100(tripKm, tripL)
+        val lamp = Fuel.tank.value.lampL
+        val reserve = lamp ?: DEFAULT_LAMP_L
+        return RangeInfo(
+            toLamp = (lvl - reserve).coerceAtLeast(0.0) / l100 * 100,
+            toEmpty = lvl / l100 * 100,
+            l100 = l100, fewData = few, lampKnown = lamp != null,
+        )
     }
 }
