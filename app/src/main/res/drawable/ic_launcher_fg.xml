@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Спидометр: дуга шкалы и стрелка. Холст 108, безопасная зона — центральные 66. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M32,70A24,24 0,1 1,76 70"
+        android:strokeColor="#2DE1D3"
+        android:strokeAlpha="0.4"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M32,70A24,24 0,0 1,54 36"
+        android:strokeColor="#2DE1D3"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M54,60L68,44"
+        android:strokeColor="#2DE1D3"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#2DE1D3"
+        android:pathData="M49,60a5,5 0,1 0,10 0a5,5 0,1 0,-10 0z" />
+</vector>
