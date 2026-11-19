@@ -292,7 +292,10 @@ fun OdoDialog(onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(enabled = v != null, onClick = {
                 val km = if (miles) v!! * 1.609344 else v!!
-                Prefs.update { it.copy(odoKm = km, odoAtTripsKm = Trips.totalKm) }
+                Prefs.update {
+                    it.copy(odoKm = km, odoAtTripsKm = Trips.totalKm, odoCheckedAt = System.currentTimeMillis(), odoCheckedTrips = Trips.totalKm)
+                }
+                com.gaifd.toyotaobd.data.Fuel.clearMissed()
                 onDismiss()
             }) { Text("Сохранить", color = C.accent) }
         },

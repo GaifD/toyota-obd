@@ -27,6 +27,7 @@ data class Tank(
     val anchorL: Double? = null,          // уровень по датчику, от которого сверяем расход
     val countedSinceAnchor: Double = 0.0, // сколько насчитали с тех пор
     val lastCalib: String? = null,        // как прошла последняя сверка — для экрана
+    val missedDrive: Boolean = false,     // похоже, машина ездила без приложения
 )
 
 /**
@@ -63,6 +64,7 @@ object Fuel {
                 anchorL = d("anchorL"),
                 countedSinceAnchor = o.optDouble("countedSinceAnchor", 0.0),
                 lastCalib = if (o.has("lastCalib")) o.optString("lastCalib") else null,
+                missedDrive = o.optBoolean("missedDrive"),
             )
         } catch (_: Exception) {
             Tank()
@@ -84,6 +86,7 @@ object Fuel {
         t.anchorL?.let { o.put("anchorL", it) }
         o.put("countedSinceAnchor", t.countedSinceAnchor)
         t.lastCalib?.let { o.put("lastCalib", it) }
+        o.put("missedDrive", t.missedDrive)
         val fa = JSONArray()
         t.fills.takeLast(300).forEach { fa.put(it.toJson()) }
         o.put("fills", fa)
@@ -136,6 +139,12 @@ object Fuel {
             )
             return null
         }
+        // Топлива меньше, чем в конце прошлой записанной поездки, — значит, ездили без приложения.
+        // Сверку расхода в этом случае не делаем (насчитанного нет), начинаем отсчёт заново.
+        if (before - sensorL > 3.0 || (t.anchorL != null && t.anchorL - sensorL > t.countedSinceAnchor * 1.3 + 3)) {
+            set(t.copy(anchorL = sensorL, countedSinceAnchor = 0.0, lastSensorL = sensorL, inTankL = sensorL, missedDrive = true))
+            return null
+        }
         val anchor = t.anchorL
         if (anchor == null) {
             set(t.copy(anchorL = sensorL, countedSinceAnchor = 0.0, lastSensorL = sensorL, inTankL = sensorL))
@@ -156,6 +165,10 @@ object Fuel {
         }
         set(t.copy(lastSensorL = sensorL, inTankL = sensorL))
         return null
+    }
+
+    fun clearMissed() {
+        set(_tank.value.copy(missedDrive = false))
     }
 
     fun dismissPending() {

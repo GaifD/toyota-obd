@@ -18,6 +18,8 @@ data class Settings(
     val speedK: Double = 1.0,            // поправка скорости
     val odoKm: Double? = null,           // пробег машины, введённый вручную (км)
     val odoAtTripsKm: Double = 0.0,      // сколько было в поездках на момент ввода
+    val odoCheckedAt: Long = 0,          // когда последний раз сверяли пробег с приборкой
+    val odoCheckedTrips: Double = 0.0,   // и сколько тогда было в поездках
     val warnCoolant: Boolean = true,
     val warnDtc: Boolean = true,
     val warnVolt: Boolean = true,
@@ -33,7 +35,7 @@ data class Settings(
     fun toJson(): JSONObject = JSONObject().apply {
         put("elmMac", elmMac); put("elmName", elmName); put("carMac", carMac); put("carName", carName)
         put("autoStart", autoStart); put("tankL", tankL); put("defaultPrice", defaultPrice)
-        put("fuelK", fuelK); put("speedK", speedK); put("odoKm", odoKm); put("odoAtTripsKm", odoAtTripsKm)
+        put("fuelK", fuelK); put("speedK", speedK); put("odoKm", odoKm); put("odoAtTripsKm", odoAtTripsKm); put("odoCheckedAt", odoCheckedAt); put("odoCheckedTrips", odoCheckedTrips)
         put("warnCoolant", warnCoolant); put("warnDtc", warnDtc); put("warnVolt", warnVolt); put("warnFuel", warnFuel); put("warnSoc", warnSoc); put("wearRate", wearRate); put("gpsTrack", gpsTrack)
         put("hudMirror", hudMirror); put("keepScreenOn", keepScreenOn); put("theme", theme); put("accent", accent)
     }
@@ -59,6 +61,8 @@ data class Settings(
                 speedK = o.optDouble("speedK", d.speedK),
                 odoKm = o.dbl("odoKm"),
                 odoAtTripsKm = o.optDouble("odoAtTripsKm", 0.0),
+                odoCheckedAt = o.optLong("odoCheckedAt", 0),
+                odoCheckedTrips = o.optDouble("odoCheckedTrips", 0.0),
                 warnCoolant = o.optBoolean("warnCoolant", true),
                 warnDtc = o.optBoolean("warnDtc", true),
                 warnVolt = o.optBoolean("warnVolt", true),

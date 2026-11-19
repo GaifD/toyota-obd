@@ -73,6 +73,8 @@ fun DashScreen(
         }
         if (live.milOn) Banner("Горит Check Engine (ошибок: ${live.dtcCount})", color = C.red, bg = C.redBg, onClick = onDiag)
 
+        OdoCheck(s, tank)
+
         StatusCard(live, s, onConnect, onDisconnect)
 
         if (radio.installed && radio.playing) RadioBar(radio, big = false)
@@ -229,6 +231,32 @@ fun DashScreen(
             dismissButton = { TextButton(onClick = { askLamp = false }) { Text("Отмена", color = C.soft) } },
         )
     }
+}
+
+/** Сверка пробега: раз в месяц или 1000 км, и сразу — если машина, похоже, ездила без приложения. */
+@Composable
+private fun OdoCheck(s: Settings, tank: Tank) {
+    val odo = Maint.odo() ?: return
+    var fix by remember { mutableStateOf(false) }
+    val total = com.gaifd.toyotaobd.data.Trips.totalKm
+    val due = tank.missedDrive || System.currentTimeMillis() - s.odoCheckedAt > 30L * 86_400_000 || total - s.odoCheckedTrips > 1000
+    if (!due) return
+    Card {
+        Text(
+            if (tank.missedDrive) "Похоже, машина ездила без приложения — сверь пробег" else "Сверь пробег с приборкой",
+            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = C.amber,
+        )
+        Text("У меня ${fmt(odo, 0)} км. На приборке столько же?", fontSize = 13.sp, color = C.soft, modifier = Modifier.padding(top = 4.dp))
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button("Да, совпадает", Modifier.weight(1f)) {
+                Prefs.update { it.copy(odoCheckedAt = System.currentTimeMillis(), odoCheckedTrips = total) }
+                Fuel.clearMissed()
+            }
+            Button("Исправить", Modifier.weight(1f), filled = false) { fix = true }
+        }
+    }
+    if (fix) OdoDialog { fix = false }
 }
 
 @Composable
