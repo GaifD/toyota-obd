@@ -125,6 +125,17 @@ object Fuel {
             set(t.copy(pendingFillL = t.pendingFillL ?: diff, lastSensorL = sensorL, inTankL = sensorL, anchorL = sensorL, countedSinceAnchor = 0.0))
             return diff
         }
+        if (diff <= -2.0) {
+            // Топлива стало меньше, чем в конце прошлой поездки, — машина ездила без приложения.
+            // Литры честные (датчик), но сверять расход по этому отрезку нельзя: начинаем отсчёт заново.
+            set(
+                t.copy(
+                    anchorL = sensorL, countedSinceAnchor = 0.0, lastSensorL = sensorL, inTankL = sensorL,
+                    lastCalib = "пропущена — была поездка без приложения (ушло ${"%.1f".format(-diff)} л)",
+                )
+            )
+            return null
+        }
         val anchor = t.anchorL
         if (anchor == null) {
             set(t.copy(anchorL = sensorL, countedSinceAnchor = 0.0, lastSensorL = sensorL, inTankL = sensorL))
