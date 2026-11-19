@@ -38,25 +38,34 @@ object Diagnosis {
             )
         }
 
-        // 1. Пропуски зажигания — их надо исключить первыми.
+        // 1. Пропуски зажигания. Единичные счёты за поездку — норма (особенно у гибрида с частыми пусками);
+        // тревожно, когда растёт среднее за 10 поездок или их десятки за одну.
         val misfireCodes = codes.filter { it.startsWith("P030") }
-        val cylCounts = mutableMapOf<Int, Int>()
-        tests?.filter { it.mid in 0xA2..0xAD && (it.tid == 0x0B || it.tid == 0x0C) }?.forEach {
+        val avg10 = mutableMapOf<Int, Int>()
+        val cur = mutableMapOf<Int, Int>()
+        tests?.filter { it.mid in 0xA2..0xAD }?.forEach {
             val cyl = it.mid - 0xA1
-            cylCounts[cyl] = maxOf(cylCounts[cyl] ?: 0, it.rawValue)
+            if (it.tid == 0x0B) avg10[cyl] = maxOf(avg10[cyl] ?: 0, it.rawValue)
+            if (it.tid == 0x0C) cur[cyl] = maxOf(cur[cyl] ?: 0, it.rawValue)
         }
-        val badCyl = cylCounts.filter { it.value >= 5 }
+        val cyls = (avg10.keys + cur.keys).toSortedSet()
+        val badCyl = cyls.filter { (avg10[it] ?: 0) >= 5 || (cur[it] ?: 0) >= 50 }
         if (misfireCodes.isNotEmpty() || badCyl.isNotEmpty()) {
-            val list = badCyl.entries.sortedByDescending { it.value }.joinToString { "цил. ${it.key}: ${it.value}" }
+            val list = badCyl.joinToString { "цил. $it: ${cur[it] ?: 0} за поездку, ${avg10[it] ?: 0} в среднем" }
             f += Finding(
                 Level.BAD, "Есть пропуски зажигания",
-                (if (list.isNotEmpty()) "Счётчики пропусков: $list. " else "") +
+                (if (list.isNotEmpty()) "$list. " else "") +
                     "Несгоревшее топливо догорает в катализаторе и перегревает его. Сначала свечи и катушки " +
                     "(можно переставить катушку на другой цилиндр и посмотреть, переедут ли пропуски)."
             )
             cause = cause ?: "пропуски зажигания"
-        } else if (cylCounts.isNotEmpty()) {
-            f += Finding(Level.OK, "Пропусков зажигания нет", "Счётчики по всем цилиндрам в норме.")
+        } else if (cyls.isNotEmpty()) {
+            val total = cur.values.sum()
+            f += Finding(
+                Level.OK, "Пропусков зажигания нет",
+                if (total > 0) "За поездку единичные счёты ($total на все цилиндры) при нулевом среднем — это норма, не неисправность."
+                else "Счётчики по всем цилиндрам в норме."
+            )
         }
 
         // 2. Ошибки датчиков кислорода — датчик дешевле катализатора.
