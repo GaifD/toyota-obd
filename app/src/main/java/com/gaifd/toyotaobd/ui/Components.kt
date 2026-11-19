@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -259,27 +261,41 @@ fun LineChart(
     }
 }
 
-/** Столбики (например, расход по скоростям). */
+/** Столбики (например, расход по скоростям) с цифрой над каждым. */
 @Composable
-fun BarChart(values: List<Double?>, labels: List<String>, modifier: Modifier = Modifier, highlight: Int? = null) {
+fun BarChart(values: List<Double?>, labels: List<String>, modifier: Modifier = Modifier, highlight: Int? = null, decimals: Int = 1) {
     val accent = C.accent
     val dim = C.border
+    val textColor = C.soft.toArgb()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val textPx = with(density) { 10.sp.toPx() }
     val maxV = values.filterNotNull().maxOrNull()?.takeIf { it > 0 } ?: 1.0
     Column(modifier.fillMaxWidth()) {
-        Canvas(Modifier.fillMaxWidth().height(110.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(130.dp)) {
             val n = values.size
             if (n == 0) return@Canvas
+            val top = textPx * 1.6f
+            val usable = size.height - top
             val slot = size.width / n
             val bw = slot * 0.62f
+            val paint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                color = textColor
+                textSize = textPx
+                textAlign = android.graphics.Paint.Align.CENTER
+            }
             values.forEachIndexed { i, v ->
                 if (v == null) return@forEachIndexed
-                val bh = (v / maxV).toFloat() * size.height
+                val bh = (v / maxV).toFloat() * usable
+                val x = i * slot + (slot - bw) / 2
                 drawRoundRect(
                     color = if (highlight == null || highlight == i) accent else dim,
-                    topLeft = Offset(i * slot + (slot - bw) / 2, size.height - bh),
+                    topLeft = Offset(x, size.height - bh),
                     size = androidx.compose.ui.geometry.Size(bw, bh),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f),
                 )
+                val label = if (decimals == 0) Math.round(v).toString() else "%.${decimals}f".format(v).replace('.', ',')
+                drawContext.canvas.nativeCanvas.drawText(label, x + bw / 2, size.height - bh - textPx * 0.4f, paint)
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {

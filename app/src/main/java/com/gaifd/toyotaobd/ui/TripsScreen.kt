@@ -116,7 +116,7 @@ fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () 
         if (speed.sumOf { it.first } > 5) item {
             SectionTitle("Расход по скоростям", if (useSteady) "л/100, ровный ход" else "л/100, вся езда")
             Card {
-                val vals = speed.map { (km, l) -> if (km >= 2) l / km * 100 else null }
+                val vals = speed.map { (km, l) -> if (km >= 0.5) l / km * 100 else null }
                 val opt = Trips.optimal()
                 BarChart(vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" }, highlight = opt?.first)
                 Spacer(Modifier.height(6.dp))
