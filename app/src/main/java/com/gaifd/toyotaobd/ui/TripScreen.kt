@@ -108,7 +108,12 @@ fun TripScreen(t: Trip, onBack: () -> Unit) {
             SectionTitle("Расход по скоростям", "л/100")
             Card {
                 val vals = t.bucketKm.indices.map { i -> if (t.bucketKm[i] >= 0.3) t.bucketL[i] / t.bucketKm[i] * 100 else null }
-                BarChart(vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" })
+                BarChart(
+                    vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" },
+                    info = { i ->
+                        "${Trip.bucketLabel(i)} км/ч: ${fmt(vals[i], 1)} л/100 · проехано ${fmt(t.bucketKm[i], 1)} км, сожжено ${fmt(t.bucketL[i], 2)} л"
+                    },
+                )
             }
         }
 

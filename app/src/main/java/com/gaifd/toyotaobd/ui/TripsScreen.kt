@@ -118,7 +118,13 @@ fun TripsScreen(trips: List<Trip>, tank: Tank, onFill: () -> Unit, onExport: () 
             Card {
                 val vals = speed.map { (km, l) -> if (km >= 0.5) l / km * 100 else null }
                 val opt = Trips.optimal()
-                BarChart(vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" }, highlight = opt?.first)
+                BarChart(
+                    vals, List(Trip.BUCKETS) { if (it == Trip.BUCKETS - 1) "110+" else "${it * 10}" }, highlight = opt?.first,
+                    info = { i ->
+                        val (km, l) = speed[i]
+                        "${Trip.bucketLabel(i)} км/ч: ${fmt(vals[i], 1)} л/100 · проехано ${fmt(km, 1)} км, сожжено ${fmt(l, 2)} л"
+                    },
+                )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     if (opt != null) "Экономнее всего на ровном ходу — ${Trip.bucketLabel(opt.first)} км/ч: ${fmt(opt.second, 1)} л/100"

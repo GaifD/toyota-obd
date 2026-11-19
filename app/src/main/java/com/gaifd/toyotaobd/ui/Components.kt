@@ -17,6 +17,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -263,7 +267,15 @@ fun LineChart(
 
 /** Столбики (например, расход по скоростям) с цифрой над каждым. */
 @Composable
-fun BarChart(values: List<Double?>, labels: List<String>, modifier: Modifier = Modifier, highlight: Int? = null, decimals: Int = 1) {
+fun BarChart(
+    values: List<Double?>,
+    labels: List<String>,
+    modifier: Modifier = Modifier,
+    highlight: Int? = null,
+    decimals: Int = 1,
+    info: ((Int) -> String)? = null,
+) {
+    var selected by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Int?>(null) }
     val accent = C.accent
     val dim = C.border
     val textColor = C.soft.toArgb()
@@ -271,7 +283,19 @@ fun BarChart(values: List<Double?>, labels: List<String>, modifier: Modifier = M
     val textPx = with(density) { 10.sp.toPx() }
     val maxV = values.filterNotNull().maxOrNull()?.takeIf { it > 0 } ?: 1.0
     Column(modifier.fillMaxWidth()) {
-        Canvas(Modifier.fillMaxWidth().height(130.dp)) {
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(130.dp)
+                .pointerInput(values, info) {
+                    if (info == null) return@pointerInput
+                    // Нажатие на столбик — подробности под графиком.
+                    detectTapGestures { pos ->
+                        val i = (pos.x / (size.width / values.size.coerceAtLeast(1))).toInt().coerceIn(0, values.size - 1)
+                        selected = if (selected == i || values.getOrNull(i) == null) null else i
+                    }
+                },
+        ) {
             val n = values.size
             if (n == 0) return@Canvas
             val top = textPx * 1.6f
@@ -289,7 +313,11 @@ fun BarChart(values: List<Double?>, labels: List<String>, modifier: Modifier = M
                 val bh = (v / maxV).toFloat() * usable
                 val x = i * slot + (slot - bw) / 2
                 drawRoundRect(
-                    color = if (highlight == null || highlight == i) accent else dim,
+                    color = when {
+                        selected != null -> if (selected == i) accent else dim
+                        highlight == null || highlight == i -> accent
+                        else -> dim
+                    },
                     topLeft = Offset(x, size.height - bh),
                     size = androidx.compose.ui.geometry.Size(bw, bh),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f),
@@ -302,6 +330,12 @@ fun BarChart(values: List<Double?>, labels: List<String>, modifier: Modifier = M
             labels.forEach {
                 Text(it, fontSize = 9.sp, color = C.muted, modifier = Modifier.weight(1f), maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
+        }
+        val sel = selected
+        if (info != null && sel != null && sel < values.size) {
+            Text(info(sel), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.text, modifier = Modifier.padding(top = 8.dp), lineHeight = 18.sp)
+        } else if (info != null) {
+            Text("Нажми на столбик — подробности", fontSize = 11.sp, color = C.faint, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
