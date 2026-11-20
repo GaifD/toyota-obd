@@ -231,18 +231,18 @@ object Fuel {
                 countedSinceFull = counted,
                 hadFull = t.hadFull || full,
                 pendingFillL = null,
-                // Без связи с машиной ждём, что уровень вырос на залитое, — чтобы в начале следующей
-                // поездки эта же заправка не нашлась второй раз.
-                lastSensorL = sensorAfter ?: if (pending) t.lastSensorL else t.lastSensorL?.let { it + liters },
+                lastSensorL = sensorAfter ?: t.lastSensorL,
+                // Без связи с машиной не знаем точный уровень — точку отсчёта сверки ставим заново
+                // в начале следующей поездки.
                 anchorL = when {
                     pending -> t.anchorL
                     sensorAfter != null -> sensorAfter
-                    else -> t.anchorL?.let { it + liters }
+                    else -> null
                 },
                 countedSinceAnchor = when {
                     pending -> t.countedSinceAnchor
                     sensorAfter != null -> -tripFuelSoFar
-                    else -> t.countedSinceAnchor
+                    else -> 0.0
                 },
                 fills = t.fills + Fill(System.currentTimeMillis(), liters, price, full),
             )
