@@ -408,6 +408,7 @@ class ObdService : Service() {
         var lastOk = System.currentTimeMillis()
         levels.clear()
         level = null
+        baseLevel = null
         fillChecked = false
         warnedCoolant = false; warnedFuel = false; warnedVolt = false; lowVoltCount = 0
         warnedSoc = false; lowSocSince = 0L; prevRpm = null
@@ -540,6 +541,7 @@ class ObdService : Service() {
         if (!fillChecked && levels.size >= 3) {
             fillChecked = true
             val l = level ?: return
+            baseLevel = l
             acc?.let { if (it.tankStart == null) it.tankStart = l }
             Fuel.atTripStart(l)?.let { added ->
                 Notify.info(
@@ -547,8 +549,25 @@ class ObdService : Service() {
                     "Укажи цену — стоимость поездок будет считаться по ней.", tab = 1, fill = true,
                 )
             }
+            return
+        }
+        // Заправка посреди поездки (заправлялся с включённой машиной): уровень вырос на 5+ л
+        // относительно самого низкого за поездку.
+        val l = level ?: return
+        val b = baseLevel
+        if (b == null || l < b) {
+            baseLevel = l
+        } else if (fillChecked && levels.size >= 5 && l - b >= 5.0) {
+            baseLevel = l
+            Fuel.midTripFill(l - b, l, acc?.fuelL ?: 0.0)
+            Notify.info(
+                this, Notify.ID_FILL, "Заправка: примерно ${fmt(l - b, 0)} л",
+                "Укажи цену — стоимость поездок будет считаться по ней.", tab = 1, fill = true,
+            )
         }
     }
+
+    private var baseLevel: Double? = null
 
     private fun readStatus(e: Elm) {
         val r = readRaw(e, Pids.STATUS) ?: return

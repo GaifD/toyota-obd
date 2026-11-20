@@ -12,8 +12,8 @@ android {
         applicationId = "com.gaifd.toyotaobd"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.1.3"
+        versionCode = 8
+        versionName = "1.1.4"
     }
 
     // Постоянный ключ: новые версии ставятся поверх старой, поездки и настройки сохраняются.

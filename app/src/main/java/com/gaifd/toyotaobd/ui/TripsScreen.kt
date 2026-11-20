@@ -197,7 +197,7 @@ fun FillDialog(suggestL: Double?, sensorAfter: Double?, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(enabled = l != null && l > 0 && p != null && p > 0, onClick = {
-                Fuel.addFill(l!!, p!!, full, sensorAfter)
+                Fuel.addFill(l!!, p!!, full, sensorAfter, com.gaifd.toyotaobd.service.Obd.live.value.trip?.fuelL ?: 0.0)
                 onDismiss()
             }) { Text("Сохранить", color = C.accent) }
         },

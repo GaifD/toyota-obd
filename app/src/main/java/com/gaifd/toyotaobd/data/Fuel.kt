@@ -167,6 +167,21 @@ object Fuel {
         return null
     }
 
+    /**
+     * Заправка посреди поездки. Топливо, сожжённое в этой поездке до заправки, ещё не списано
+     * (спишется в конце поездки) — заранее вычитаем его из счётчика сверки, чтобы сверка не сбилась.
+     */
+    @Synchronized
+    fun midTripFill(added: Double, sensorL: Double, tripFuelSoFar: Double) {
+        val t = _tank.value
+        set(
+            t.copy(
+                pendingFillL = (t.pendingFillL ?: 0.0) + added, lastSensorL = sensorL, inTankL = sensorL,
+                anchorL = sensorL, countedSinceAnchor = -tripFuelSoFar, missedDrive = false,
+            )
+        )
+    }
+
     fun clearMissed() {
         set(_tank.value.copy(missedDrive = false))
     }
@@ -184,7 +199,7 @@ object Fuel {
      * Записать заправку. До полного — ещё и калибровка расхода по двум полным бакам (точнее всего).
      */
     @Synchronized
-    fun addFill(liters: Double, price: Double, full: Boolean, sensorAfter: Double?) {
+    fun addFill(liters: Double, price: Double, full: Boolean, sensorAfter: Double?, tripFuelSoFar: Double = 0.0) {
         val t = _tank.value
         val s = Prefs.settings.value
         val pending = t.pendingFillL != null
@@ -216,9 +231,19 @@ object Fuel {
                 countedSinceFull = counted,
                 hadFull = t.hadFull || full,
                 pendingFillL = null,
-                lastSensorL = sensorAfter ?: t.lastSensorL,
-                anchorL = if (pending) t.anchorL else sensorAfter ?: t.anchorL,
-                countedSinceAnchor = if (pending || sensorAfter != null) 0.0 else t.countedSinceAnchor,
+                // Без связи с машиной ждём, что уровень вырос на залитое, — чтобы в начале следующей
+                // поездки эта же заправка не нашлась второй раз.
+                lastSensorL = sensorAfter ?: if (pending) t.lastSensorL else t.lastSensorL?.let { it + liters },
+                anchorL = when {
+                    pending -> t.anchorL
+                    sensorAfter != null -> sensorAfter
+                    else -> t.anchorL?.let { it + liters }
+                },
+                countedSinceAnchor = when {
+                    pending -> t.countedSinceAnchor
+                    sensorAfter != null -> -tripFuelSoFar
+                    else -> t.countedSinceAnchor
+                },
                 fills = t.fills + Fill(System.currentTimeMillis(), liters, price, full),
             )
         )
