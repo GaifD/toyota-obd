@@ -152,8 +152,16 @@ object Fuel {
         }
         if (t.countedSinceAnchor >= CALIB_MIN_L) {
             val real = anchor - sensorL
+            val raw = real / t.countedSinceAnchor
+            if (real > 3 && raw !in 0.8..1.25) {
+                // Слишком большое расхождение — это не ошибка счёта, а пропущенная заправка или
+                // поездка без приложения. Поправку не трогаем, отсчёт начинаем заново.
+                val note = "пропущена: по датчику ушло ${"%.1f".format(real)} л, насчитано ${"%.1f".format(t.countedSinceAnchor)} л — похоже, была незамеченная заправка"
+                set(t.copy(anchorL = sensorL, countedSinceAnchor = 0.0, lastSensorL = sensorL, inTankL = sensorL, lastCalib = note))
+                return null
+            }
             if (real > 3) {
-                val ratio = (real / t.countedSinceAnchor).coerceIn(0.75, 1.3)
+                val ratio = raw
                 val s = Prefs.settings.value
                 val k = (s.fuelK * ratio).coerceIn(0.5, 2.0)
                 // Плавно: половина шага — один неточный замер не испортит всё.

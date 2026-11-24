@@ -94,6 +94,14 @@ object Prefs {
         } catch (_: Exception) {
             Settings()
         }
+        // 1.1.6: поправка расхода могла сбиться из-за пропущенной заправки — разово сбрасываем.
+        if (!sp.getBoolean("fuelKReset116", false)) {
+            sp.edit().putBoolean("fuelKReset116", true).apply()
+            if (_settings.value.fuelK != 1.0) {
+                _settings.value = _settings.value.copy(fuelK = 1.0)
+                sp.edit().putString("settings", _settings.value.toJson().toString()).apply()
+            }
+        }
         ready = true
     }
 
